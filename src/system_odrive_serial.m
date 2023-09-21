@@ -30,7 +30,8 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         UseIndex0 = false % Use index input of encoder
 
         ResetErrors0 = true; % Reset all error codes
-
+        ResetErrors1 = true;
+        
         EnableError0Output = false; % Enable error output
 
     end
@@ -49,7 +50,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
     end
 
     properties(Nontunable)
-        VelocityLimit0 = 20*pi; % Velocity limit [rad/s]
+        VelocityLimit0 = 40*pi; % Velocity limit [rad/s]
         CurrentLimit0 = 40; % Current limit [A]
         
         CountsPerRotate0 = 8192; % Counts per rotate of encoder
@@ -97,19 +98,13 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
             %Find motor
             try
                 obj.portFilePointer = obj.odrive_connect(portname, 115200);
+            catch e
+                error(e.message)
             end
+
             parameter = "vbus_voltage";
             a = obj.odrive_read_float(obj.portFilePointer, parameter);
 		    disp(a)
-			%Check if the port is functional
-            %catch e
-            %obj.portFilePointer = e.message;
-            %end
-            
-            %err_type = 'Python Error: TimeoutError';
-            %if (strcmp(obj.portFilePointer, err_type))
-            %    error('Error. \n %s \n Odrive Not connected',err_type)                 
-            %end
             
             %Other
             motor0_calibrated = false;
@@ -133,6 +128,15 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 %Check if motor/encoder is ready
                 motor0_calibrated = obj.odrive_read_int(obj.portFilePointer, "axis0.motor.is_calibrated");
                 encoder0_ready = obj.odrive_read_int(obj.portFilePointer, "axis0.encoder.is_ready");
+            end
+            
+            if obj.EnableAxis1
+                if obj.ResetErrors1
+                    obj.odrive_write_int(obj.portFilePointer, "axis1.motor.error", 0);
+					obj.odrive_write_int(obj.portFilePointer, "axis1.encoder.error", 0);
+					obj.odrive_write_int(obj.portFilePointer, "axis1.controller.error", 0);
+					obj.odrive_write_int(obj.portFilePointer, "axis1.error", 0);
+                end
             end
 
             
@@ -203,6 +207,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 %                     fprintf(ind)
                     value = value*obj.outputMultiplier(ind);
                     varargout{ind} = value;
+                    
                 end
                 if obj.EnableTiming
                     endTime = toc;
