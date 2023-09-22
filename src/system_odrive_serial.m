@@ -8,11 +8,12 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 
     properties (Nontunable)
         Autocalibration = 'Disabled (fail if not calibrated)'
+        PortName = 'COM5'; %PortName
     end
 
-%     properties(Nontunable, PositiveInteger)
-%         Baudrate = 115200
-%     end
+    properties(Nontunable, PositiveInteger)
+        Baudrate = 115200; %Baudrate
+    end
 
     properties (Nontunable, Logical)
         EnableAxis0 = true; % Enable
@@ -26,13 +27,19 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         EnableCurrent0Output = false; % Enable estimated current output
 
         EnablePosition1Output = false; % Enable estimated position output
+        EnableVelocity1Output = false; % Enable estimated velocity output
+        EnableCurrent1Output = false; % Enable estimated current output
 
         UseIndex0 = false % Use index input of encoder
 
         ResetErrors0 = true; % Reset all error codes
         ResetErrors1 = true;
+
+        ResetPosition0 = true;
+        ResetPosition1 = true;
         
         EnableError0Output = false; % Enable error output
+        EnableError1Output = false; % Enable error output
 
     end
 
@@ -46,7 +53,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
     properties(Constant, Hidden)
         ControlMode0Set = matlab.system.StringSet({'Position','Velocity','Current'})
 %         ControlMode1Set = matlab.system.StringSet({'Position','Velocity','Current'})
-        AutocalibrationSet = matlab.system.StringSet({'Disabled (fail if not calibrated)','Autocalibrate','Autocalibrate and store'})
+        AutocalibrationSet = matlab.system.StringSet({'Disabled (fail if not calibrated)','Autocalibrate'})
     end
 
     properties(Nontunable)
@@ -72,8 +79,8 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         inputMultiplier = ones(1, 0);
         outputMultiplier = ones(1, 0);
         portFilePointer = 0;
-        odrive_module = 0;
-        odrive_usdef = 0;
+        ini_pos0 = 0;
+        endtime = 0;
     end
 
     
@@ -94,10 +101,9 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
             [~, obj.inputParameters, obj.inputMultiplier, ~] = obj.generateInputs();
             [~, obj.outputParameters, obj.outputMultiplier, ~] = obj.generateOutputs();
             
-			portname = "COM5";
             %Find motor
             try
-                obj.portFilePointer = obj.odrive_connect(portname, 115200);
+                obj.portFilePointer = obj.odrive_connect(obj.PortName, obj.Baudrate);
             catch e
                 error(e.message)
             end
@@ -144,7 +150,10 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
             if (strcmp(obj.Autocalibration, 'Disabled (fail if not calibrated)'))
                 if obj.EnableAxis0 && (~motor0_calibrated || ~encoder0_ready)
                     error('Error. \n Axis 0 not ready, need calibration')
+                else
+                    obj.odrive_write_int(obj.portFilePointer, "axis0.requested_state", int32(8));
                 end
+
             end
 
             if startsWith(obj.Autocalibration, 'Autocalibrate')
@@ -174,6 +183,9 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 end
                 %Closed Loop
                 obj.odrive_write_int(obj.portFilePointer, "axis0.requested_state", int32(8));
+                if obj.ResetPosition0
+                    obj.ini_pos0 = obj.odrive_read_float(obj.portFilePointer, "axis0.encoder.pos_estimate");
+                end
             end
             
         end
@@ -199,19 +211,17 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                     flush(obj.portFilePointer)
                 end
                 for ind = 1:nargout
-%                     value = 0;
                     flush(obj.portFilePointer)
                     value = obj.odrive_read_float(obj.portFilePointer, obj.outputParameters{ind});
-%                     fprintf(obj.outputMultiplier)
-%                     fprintf(obj.outputMultiplier(ind))
-%                     fprintf(ind)
+                    if strcmp(obj.outputParameters{ind}, 'axis0.encoder.pos_estimate')
+                        value = value - obj.ini_pos0;
+                    end
                     value = value*obj.outputMultiplier(ind);
                     varargout{ind} = value;
-                    
                 end
                 if obj.EnableTiming
-                    endTime = toc;
-                    disp(endTime);
+                    endTime = toc; 
+                    disp(endTime)
                 end
             end
         end
@@ -240,9 +250,9 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 names{count} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
                 %Transforms into p or v
                 parameters{count} = lower(obj.ControlMode0(1));
-%                 if parameters{count} == 'v' || parameters{count} == 'p'
-%                     multipliers(count) = obj.CountsPerRotate0/(2*pi);
-%                 end
+                if parameters{count} == 'v' || parameters{count} == 'p'
+                    multipliers(count) = 1/(2*pi);
+                end
                 count=count+1;
             end
             
@@ -277,14 +287,14 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 if obj.EnablePosition0Output
                     parameters{count} = 'axis0.encoder.pos_estimate';
                     names{count} = 'Axis 0 Estimated position [rad]';
-%                     multipliers(count) = (2*pi)/obj.CountsPerRotate0;
+                    multipliers(count) = (2*pi);
                     count=count+1;
                 end
 
                 if obj.EnableVelocity0Output
                     parameters{count} = 'axis0.encoder.vel_estimate';
                     names{count} = 'Axis 0 Estimated velocity [rad/s]';
-%                     multipliers(count) = (2*pi)/obj.CountsPerRotate0;
+                    multipliers(count) = (2*pi);
                     count=count+1;
                 end
                 
@@ -305,9 +315,30 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 if obj.EnablePosition1Output
                     parameters{count} = 'axis1.encoder.pos_estimate';
                     names{count} = 'Axis 1 Estimated position [rad]';
-%                     multipliers(count) = (2*pi)/obj.CountsPerRotate1;
+                    multipliers(count) = (2*pi);
                     count=count+1;
                 end
+
+                if obj.EnableVelocity1Output
+                    parameters{count} = 'axis1.encoder.vel_estimate';
+                    names{count} = 'Axis 1 Estimated velocity [rad/s]';
+                    multipliers(count) = (2*pi);
+                    count=count+1;
+                end
+                
+                if obj.EnableCurrent1Output
+                    parameters{count} = 'axis1.motor.current_control.Iq_measured';
+                    names{count} = 'Axis 1 Measured current [A]';
+                    count=count+1;
+                end
+
+                if obj.EnableError1Output
+                    parameters{count} = 'axis1.error';
+                    names{count} = 'Axis 1 Error state';
+                    count=count+1;
+                end
+
+                
             end
 
 
@@ -469,17 +500,32 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         function groups = getPropertyGroupsImpl
             % Define property section(s) for System block dialog
             % group = matlab.system.display.Section(mfilename("class"));
+            configGroup1 = matlab.system.display.Section(...
+               'Title','ODrive Connection',...
+               'PropertyList',{'PortName', 'Baudrate'});
+
            configGroup = matlab.system.display.Section(...
                'Title','ODrive configuration',...
                'PropertyList',{'Autocalibration', 'EnableTiming'});
                      
+
+           Measure0Group = matlab.system.display.Section( ...
+               'Title', 'Enable Measurements', ...
+               'PropertyList',{'EnablePosition0Output', 'EnableVelocity0Output', 'EnableCurrent0Output', 'EnableError0Output'});
+
            axis0Group = matlab.system.display.SectionGroup(...
                'Title','Axis 0', ...
-               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0', 'EnablePosition0Output', 'EnableVelocity0Output', 'EnableCurrent0Output', 'EnableError0Output'});
+               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0', 'ResetPosition0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0'}, ...
+               'Sections',Measure0Group);
+
+           Measure1Group = matlab.system.display.Section( ...
+               'Title', 'Enable Measurements', ...
+               'PropertyList',{'EnablePosition1Output','EnableVelocity1Output', 'EnableCurrent1Output', 'EnableError1Output'});
            
            axis1Group = matlab.system.display.SectionGroup(...
-               'Title','Others', ...
-               'PropertyList',{'EnableAxis1', 'CountsPerRotate1', 'EnablePosition1Output'});
+               'Title','Axis 1', ...
+               'PropertyList',{'EnableAxis1', 'CountsPerRotate1'}, ...
+               'Sections',Measure1Group);
 
            inputsGroup = matlab.system.display.SectionGroup(...
                'Title','Inputs', ...
@@ -489,7 +535,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                'Title','Outputs', ...
                'PropertyList',{'MaxOutputParameters','EnableVbusOutput','Outputs'});
 
-           groups = [configGroup, axis0Group, axis1Group, inputsGroup, outputsGroup];
+           groups = [configGroup1, configGroup, axis0Group, axis1Group, inputsGroup, outputsGroup];
         end
         
         function simMode = getSimulateUsingImpl(~)
