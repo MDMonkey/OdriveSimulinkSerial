@@ -80,7 +80,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         outputMultiplier = ones(1, 0);
         portFilePointer = 0;
         ini_pos0 = 0;
-        endtime = 0;
+        osci_int = 0;
     end
 
     
@@ -129,7 +129,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 				
                 obj.odrive_write_int(obj.portFilePointer, "axis0.encoder.config.use_index", int32(obj.UseIndex0));
                 obj.odrive_write_int(obj.portFilePointer, "axis0.motor.config.current_lim", obj.CurrentLimit0);
-                vel_limit = (obj.VelocityLimit0*obj.CountsPerRotate0)/(2*pi);
+                vel_limit = (obj.VelocityLimit0)/(2*pi);
                 obj.odrive_write_int(obj.portFilePointer, "axis0.controller.config.vel_limit", vel_limit);
                 %Check if motor/encoder is ready
                 motor0_calibrated = obj.odrive_read_int(obj.portFilePointer, "axis0.motor.is_calibrated");
@@ -188,6 +188,10 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 end
             end
             
+            if obj.EnableTiming
+                obj.odrive_write_int(obj.portFilePointer, "config.error_gpio_pin", int32(8));
+                obj.odrive_write_int(obj.portFilePointer, "config.gpio8_mode", int32(15));                
+            end
         end
         
         
@@ -203,12 +207,14 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
             else
     
                 if obj.EnableTiming
-                    tic;
+                    obj.odrive_write_int(obj.portFilePointer, "axis0.motor.error", int32(obj.osci_int));
+                    obj.osci_int = 0^(obj.osci_int);
                 end
+
                 for ind = 1:(nargin-1)
-                    value = varargin{ind}*obj.inputMultiplier(ind);
-                    obj.odrive_quick_write(obj.portFilePointer,obj.inputParameters{ind}(1),0, value);
                     flush(obj.portFilePointer)
+                    value = varargin{ind}*obj.inputMultiplier(ind);
+                    obj.odrive_quick_write(obj.portFilePointer,obj.inputParameters{ind}(1),0, value);    
                 end
                 for ind = 1:nargout
                     flush(obj.portFilePointer)
@@ -218,10 +224,6 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                     end
                     value = value*obj.outputMultiplier(ind);
                     varargout{ind} = value;
-                end
-                if obj.EnableTiming
-                    endTime = toc; 
-                    disp(endTime)
                 end
             end
         end
@@ -559,7 +561,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 		end
 		
 		function value = odrive_read_float(fd, parameter)
-			flush(fd)
+            flush(fd)
 			writeline(fd, sprintf('r %s\n', parameter));
 			value = readline(fd);
 			if isempty(value)
