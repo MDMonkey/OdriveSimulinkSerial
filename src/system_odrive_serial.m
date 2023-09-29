@@ -51,14 +51,14 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
     end
     
     properties(Constant, Hidden)
-        ControlMode0Set = matlab.system.StringSet({'Position','Velocity','Current'})
-%         ControlMode1Set = matlab.system.StringSet({'Position','Velocity','Current'})
+        ControlMode0Set = matlab.system.StringSet({'Position','Velocity','Torque'})
         AutocalibrationSet = matlab.system.StringSet({'Disabled (fail if not calibrated)','Autocalibrate'})
     end
 
     properties(Nontunable)
         VelocityLimit0 = 40*pi; % Velocity limit [rad/s]
         CurrentLimit0 = 40; % Current limit [A]
+        TorqueLimit0 = 1.5; % Torque limit [Nm]
         
         CountsPerRotate0 = 8192; % Counts per rotate of encoder
         CountsPerRotate1 = 8192; % Counts per rotate of encoder
@@ -80,6 +80,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         outputMultiplier = ones(1, 0);
         portFilePointer = 0;
         ini_pos0 = 0;
+        ini_pos1 = 0;
         osci_int = 0;
     end
 
@@ -121,13 +122,14 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 					obj.odrive_write_int(obj.portFilePointer, "axis0.controller.error", 0);
 					obj.odrive_write_int(obj.portFilePointer, "axis0.error", 0);
                 end
-                %Other configs 
-                % Encoder - Use Index - currentlim
-				
+
+                % Write Limits
                 obj.odrive_write_int(obj.portFilePointer, "axis0.encoder.config.use_index", int32(obj.UseIndex0));
-                obj.odrive_write_int(obj.portFilePointer, "axis0.motor.config.current_lim", obj.CurrentLimit0);
+                obj.odrive_write_float(obj.portFilePointer, "axis0.motor.config.current_lim", obj.CurrentLimit0);
+                obj.odrive_write_float(obj.portFilePointer, "axis0.motor.config.torque_lim", obj.TorqueLimit0);
                 vel_limit = (obj.VelocityLimit0)/(2*pi);
-                obj.odrive_write_int(obj.portFilePointer, "axis0.controller.config.vel_limit", vel_limit);
+                obj.odrive_write_float(obj.portFilePointer, "axis0.controller.config.vel_limit", vel_limit);
+
                 %Check if motor/encoder is ready
                 flush(obj.portFilePointer)
                 motor0_calibrated = obj.odrive_read_int(obj.portFilePointer, "axis0.motor.is_calibrated");
@@ -152,7 +154,6 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 else
                     obj.odrive_write_int(obj.portFilePointer, "axis0.requested_state", int32(8));
                 end
-
             end
 
             if startsWith(obj.Autocalibration, 'Autocalibrate')
@@ -160,14 +161,12 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                     fprintf('heyy')
                     obj.odrive_write_int(obj.portFilePointer, "axis0.requested_state", int32(3));
                     pause(15)
-                    %obj.autocalibration(obj.portFilePointer)
                     disp('Calibrating...')
 					%CHeck ISSO
                     while int32(obj.odrive_read_int(obj.portFilePointer, 'axis0.motor.is_armed')) ~= 0
                         continue
                     end
                 end
-            
             end
 
 
@@ -177,7 +176,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 						obj.odrive_write_int(obj.portFilePointer, "axis0.controller.config.control_mode", int32(3));
                     case 'Velocity'
                         obj.odrive_write_int(obj.portFilePointer, "axis0.controller.config.control_mode", int32(2));
-                    case 'Current'
+                    case 'Torque'
                         obj.odrive_write_int(obj.portFilePointer, "axis0.controller.config.control_mode", int32(1));
                 end
                 %Closed Loop
@@ -186,6 +185,13 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                     obj.ini_pos0 = obj.odrive_read_float(obj.portFilePointer, "axis0.encoder.pos_estimate");
                 end
             end
+
+            if obj.EnableAxis1
+                if obj.ResetPosition1
+                    obj.ini_pos1 = obj.odrive_read_float(obj.portFilePointer, "axis1.encoder.pos_estimate");
+                end
+            end
+
             %Osciloscope
             if obj.EnableTiming
                 obj.odrive_write_int(obj.portFilePointer, "config.error_gpio_pin", int32(8));
@@ -219,9 +225,13 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 for ind = 1:nargout
                     flush(obj.portFilePointer)
                     value = obj.odrive_read_float(obj.portFilePointer, obj.outputParameters{ind});
+
                     if strcmp(obj.outputParameters{ind}, 'axis0.encoder.pos_estimate')
                         value = value - obj.ini_pos0;
+                    elseif strcmp(obj.outputParameters{ind}, 'axis1.encoder.pos_estimate')
+                        value = value - obj.ini_pos1;
                     end
+
                     value = value*obj.outputMultiplier(ind);
                     varargout{ind} = value;
                 end
@@ -235,7 +245,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 switch(obj.ControlMode0)
                     case 'Velocity'
                         obj.odrive_write_int(obj.portFilePointer, "axis0.controller.input_vel", int32(0));
-                    case 'Current'
+                    case 'Torque'
 					obj.odrive_write_int(obj.portFilePointer, "axis0.controller.input_torque", int32(0));
                 end
             end
@@ -521,7 +531,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 
            axis0Group = matlab.system.display.SectionGroup(...
                'Title','Axis 0', ...
-               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0', 'ResetPosition0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'CountsPerRotate0'}, ...
+               'PropertyList',{'EnableAxis0','UseIndex0','ResetErrors0', 'ResetPosition0','ControlMode0','VelocityLimit0', 'CurrentLimit0', 'TorqueLimit0', 'CountsPerRotate0'}, ...
                'Sections',Measure0Group);
 
            Measure1Group = matlab.system.display.Section( ...
