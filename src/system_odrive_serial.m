@@ -20,7 +20,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
         EnableAxis1 = false; % Enable
         
         EnableVbusOutput = false; % Bus voltage output
-        EnableTiming = false; % Enable block timing
+        EnableTiming = false; % Enable Osciloscope Sample Timing
 
         EnablePosition0Output = false; % Enable estimated position output
         EnableVelocity0Output = false; % Enable estimated velocity output
@@ -108,9 +108,6 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 error(e.message)
             end
 
-            parameter = "vbus_voltage";
-            a = obj.odrive_read_float(obj.portFilePointer, parameter);
-		    disp(a)
             
             %Other
             motor0_calibrated = false;
@@ -132,7 +129,9 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 vel_limit = (obj.VelocityLimit0)/(2*pi);
                 obj.odrive_write_int(obj.portFilePointer, "axis0.controller.config.vel_limit", vel_limit);
                 %Check if motor/encoder is ready
+                flush(obj.portFilePointer)
                 motor0_calibrated = obj.odrive_read_int(obj.portFilePointer, "axis0.motor.is_calibrated");
+                flush(obj.portFilePointer)
                 encoder0_ready = obj.odrive_read_int(obj.portFilePointer, "axis0.encoder.is_ready");
             end
             
@@ -187,7 +186,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                     obj.ini_pos0 = obj.odrive_read_float(obj.portFilePointer, "axis0.encoder.pos_estimate");
                 end
             end
-            
+            %Osciloscope
             if obj.EnableTiming
                 obj.odrive_write_int(obj.portFilePointer, "config.error_gpio_pin", int32(8));
                 obj.odrive_write_int(obj.portFilePointer, "config.gpio8_mode", int32(15));                
@@ -214,7 +213,8 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 for ind = 1:(nargin-1)
                     flush(obj.portFilePointer)
                     value = varargin{ind}*obj.inputMultiplier(ind);
-                    obj.odrive_quick_write(obj.portFilePointer,obj.inputParameters{ind}(1),0, value);    
+                    obj.odrive_controller_input(obj.portFilePointer,obj.inputParameters{ind}, value);
+                    flush(obj.portFilePointer)
                 end
                 for ind = 1:nargout
                     flush(obj.portFilePointer)
@@ -251,8 +251,14 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
             if obj.EnableAxis0
                 names{count} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
                 %Transforms into p or v
-                parameters{count} = lower(obj.ControlMode0(1));
-                if parameters{count} == 'v' || parameters{count} == 'p'
+                 
+                if lower(obj.ControlMode0(1)) == 'c'
+                    parameters{count} = 'input_torque';
+                elseif lower(obj.ControlMode0(1)) == 'p'
+                    parameters{count} = 'input_pos';
+                    multipliers(count) = 1/(2*pi);
+                else
+                    parameters{count} = 'input_vel';
                     multipliers(count) = 1/(2*pi);
                 end
                 count=count+1;
@@ -339,8 +345,6 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                     names{count} = 'Axis 1 Error state';
                     count=count+1;
                 end
-
-                
             end
 
 
@@ -610,6 +614,12 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
 			output = [];
 		end
 		
+        function output = odrive_controller_input(fd, parameter, value)
+            flush(fd);
+			writeline(fd, sprintf('w axis0.controller.%s %d\n', parameter, value));
+			output = [];
+        end
+
 		function vbus_value = odrive_vbus_voltage(fd)
 			vbus_value = odrive_read_int(fd, 'vbus_voltage');
 		end
