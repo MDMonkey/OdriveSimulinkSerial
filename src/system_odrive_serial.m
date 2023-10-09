@@ -262,7 +262,7 @@ classdef (StrictDefaults) system_odrive_serial< matlab.System
                 names{count} = ['Axis 0 Reference ', lower(obj.ControlMode0)];
                 %Transforms into p or v
                  
-                if lower(obj.ControlMode0(1)) == 'c'
+                if lower(obj.ControlMode0(1)) == 't'
                     parameters{count} = 'input_torque';
                 elseif lower(obj.ControlMode0(1)) == 'p'
                     parameters{count} = 'input_pos';
